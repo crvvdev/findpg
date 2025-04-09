@@ -17,6 +17,8 @@
 #include <vector>
 #include <utility>
 #include <set>
+#include <algorithm>
+#include <format>
 
 // Other external headers
 // Windows headers

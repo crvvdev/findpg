@@ -10,152 +10,138 @@
 
 // Original headers
 
-
 ////////////////////////////////////////////////////////////////////////////////
 //
 // macro utilities
 //
 
-static const auto PXE_BASE    = 0xFFFFF6FB7DBED000UI64;
-static const auto PXE_SELFMAP = 0xFFFFF6FB7DBEDF68UI64;
-static const auto PPE_BASE    = 0xFFFFF6FB7DA00000UI64;
-static const auto PDE_BASE    = 0xFFFFF6FB40000000UI64;
-static const auto PTE_BASE    = 0xFFFFF68000000000UI64;
+static auto PXE_BASE = 0xFFFFF6FB7DBED000UI64;
+static auto PPE_BASE = 0xFFFFF6FB7DA00000UI64;
+static auto PDE_BASE = 0xFFFFF6FB40000000UI64;
+static auto PTE_BASE = 0xFFFFF68000000000UI64;
 
-static const auto PXE_TOP     = 0xFFFFF6FB7DBEDFFFUI64;
-static const auto PPE_TOP     = 0xFFFFF6FB7DBFFFFFUI64;
-static const auto PDE_TOP     = 0xFFFFF6FB7FFFFFFFUI64;
-static const auto PTE_TOP     = 0xFFFFF6FFFFFFFFFFUI64;
+static const auto PXE_TOP = 0xFFFFF6FB7DBEDFFFUI64;
+static const auto PPE_TOP = 0xFFFFF6FB7DBFFFFFUI64;
+static const auto PDE_TOP = 0xFFFFF6FB7FFFFFFFUI64;
+static const auto PTE_TOP = 0xFFFFF6FFFFFFFFFFUI64;
 
 static const auto PTI_SHIFT = 12;
 static const auto PDI_SHIFT = 21;
 static const auto PPI_SHIFT = 30;
 static const auto PXI_SHIFT = 39;
 
+__forceinline static void PteInitialize(ULONG_PTR PteBase) {
+  PTE_BASE = PteBase;
+  PDE_BASE = PTE_BASE + ((PTE_BASE & 0xffffffffffff) >> 9);
+  PPE_BASE = PTE_BASE + ((PDE_BASE & 0xffffffffffff) >> 9);
+  PXE_BASE = PTE_BASE + ((PPE_BASE & 0xffffffffffff) >> 9);
+}
 
 ////////////////////////////////////////////////////////////////////////////////
 //
 // constants and macros
 //
 
-
 ////////////////////////////////////////////////////////////////////////////////
 //
 // types
 //
 
-static const auto HARDWARE_PTE_WORKING_SET_BITS = 11;
-typedef struct _HARDWARE_PTE
-{
-    ULONG64 Valid : 1;
-    ULONG64 Write : 1;                // UP version
-    ULONG64 Owner : 1;
-    ULONG64 WriteThrough : 1;
-    ULONG64 CacheDisable : 1;
-    ULONG64 Accessed : 1;
-    ULONG64 Dirty : 1;
-    ULONG64 LargePage : 1;
-    ULONG64 Global : 1;
-    ULONG64 CopyOnWrite : 1;          // software field
-    ULONG64 Prototype : 1;            // software field
-    ULONG64 reserved0 : 1;            // software field
-    ULONG64 PageFrameNumber : 28;
-    ULONG64 reserved1 : 24 - (HARDWARE_PTE_WORKING_SET_BITS + 1);
-    ULONG64 SoftwareWsIndex : HARDWARE_PTE_WORKING_SET_BITS;
-    ULONG64 NoExecute : 1;
-} HARDWARE_PTE, *PHARDWARE_PTE;
-C_ASSERT(sizeof(HARDWARE_PTE) == 8);
+#pragma warning(disable : 4214)
+typedef struct _MMPTE_HARDWARE64 {
+  ULONGLONG Valid : 1;
+  ULONGLONG Dirty1 : 1;
+  ULONGLONG Owner : 1;
+  ULONGLONG WriteThrough : 1;
+  ULONGLONG CacheDisable : 1;
+  ULONGLONG Accessed : 1;
+  ULONGLONG Dirty : 1;
+  ULONGLONG LargePage : 1;
+  ULONGLONG Global : 1;
+  ULONGLONG CopyOnWrite : 1;
+  ULONGLONG Unused : 1;
+  ULONGLONG Write : 1;
+  ULONGLONG PageFrameNumber : 36;
+  ULONGLONG reserved1 : 4;
+  ULONGLONG SoftwareWsIndex : 11;
+  ULONGLONG NoExecute : 1;
+} MMPTE_HARDWARE64, *PMMPTE_HARDWARE64;
 
+typedef struct _MMPTE {
+  union {
+    ULONG_PTR Long;
+    MMPTE_HARDWARE64 Hard;
+  } u;
+} MMPTE;
+typedef MMPTE* PMMPTE;
+#pragma warning(default : 4214)
 
 ////////////////////////////////////////////////////////////////////////////////
 //
 // prototypes
 //
 
-
 ////////////////////////////////////////////////////////////////////////////////
 //
 // variables
 //
-
 
 ////////////////////////////////////////////////////////////////////////////////
 //
 // implementations
 //
 
-inline
-void* MiPxeToAddress(
-    __in PHARDWARE_PTE PointerPxe)
-{
-    return reinterpret_cast<void*>(
-        (reinterpret_cast<LONG64>(PointerPxe) << 52) >> 16);
-}
+#define PAGE_SHIFT 12L
 
+#ifndef PTE_SHIFT
+#define PTE_SHIFT 3
+#endif
+#ifndef PTI_SHIFT
+#define PTI_SHIFT 12
+#endif
+#ifndef PDI_SHIFT
+#define PDI_SHIFT 21
+#endif
+#ifndef PPI_SHIFT
+#define PPI_SHIFT 30
+#endif
+#ifndef PXI_SHIFT
+#define PXI_SHIFT 39
+#endif
 
-inline
-void* MiPpeToAddress(
-    __in PHARDWARE_PTE PointerPpe)
-{
-    return reinterpret_cast<void*>(
-        (reinterpret_cast<LONG64>(PointerPpe) << 43) >> 16);
-}
+#define VIRTUAL_ADDRESS_BITS 48
+#define VIRTUAL_ADDRESS_MASK ((((ULONG_PTR)1) << VIRTUAL_ADDRESS_BITS) - 1)
 
+#define PTE_PER_PAGE 512
+#define PDE_PER_PAGE 512
+#define PPE_PER_PAGE 512
+#define PXE_PER_PAGE 512
 
-inline
-void* MiPdeToAddress(
-    __in PHARDWARE_PTE PointerPde)
-{
-    return reinterpret_cast<void*>(
-        (reinterpret_cast<LONG64>(PointerPde) << 34) >> 16);
-}
+#define PPI_MASK (PPE_PER_PAGE - 1)
+#define PXI_MASK (PXE_PER_PAGE - 1)
 
+#define MiGetPxeOffset(va) ((ULONG)(((ULONG_PTR)(va) >> PXI_SHIFT) & PXI_MASK))
 
-inline
-void* MiPteToAddress(
-    __in PHARDWARE_PTE PointerPte)
-{
-    return reinterpret_cast<void*>(
-        (reinterpret_cast<LONG64>(PointerPte) << 25) >> 16);
-}
+#define MiGetPxeAddress(va) ((PMMPTE)PXE_BASE + MiGetPxeOffset(va))
 
+#define MiGetPpeAddress(va)                                          \
+  ((PMMPTE)(((((ULONG_PTR)(va) & VIRTUAL_ADDRESS_MASK) >> PPI_SHIFT) \
+             << PTE_SHIFT) +                                         \
+            PPE_BASE))
 
-inline
-PHARDWARE_PTE MiAddressToPxe(
-    __in void* Address)
-{
-    auto Offset = reinterpret_cast<ULONG64>(Address) >> (PXI_SHIFT - 3);
-    Offset &= (0x1FF << 3);
-    return reinterpret_cast<PHARDWARE_PTE>(PXE_BASE + Offset);
-}
+#define MiGetPdeAddress(va)                                          \
+  ((PMMPTE)(((((ULONG_PTR)(va) & VIRTUAL_ADDRESS_MASK) >> PDI_SHIFT) \
+             << PTE_SHIFT) +                                         \
+            PDE_BASE))
 
+#define MiGetPteAddress(va)                                          \
+  ((PMMPTE)(((((ULONG_PTR)(va) & VIRTUAL_ADDRESS_MASK) >> PTI_SHIFT) \
+             << PTE_SHIFT) +                                         \
+            PTE_BASE))
 
-inline
-PHARDWARE_PTE MiAddressToPpe(
-    __in void* Address)
-{
-    auto Offset = reinterpret_cast<ULONG64>(Address) >> (PPI_SHIFT - 3);
-    Offset &= (0x3FFFF << 3);
-    return reinterpret_cast<PHARDWARE_PTE>(PPE_BASE + Offset);
-}
+#define VA_SHIFT (63 - 47)  // address sign extend shift count
 
-
-inline
-PHARDWARE_PTE MiAddressToPde(
-    __in void* Address)
-{
-    auto Offset = reinterpret_cast<ULONG64>(Address) >> (PDI_SHIFT - 3);
-    Offset &= (0x7FFFFFF << 3);
-    return reinterpret_cast<PHARDWARE_PTE>(PDE_BASE + Offset);
-}
-
-
-inline
-PHARDWARE_PTE MiAddressToPte(
-    __in void* Address)
-{
-    auto Offset = reinterpret_cast<ULONG64>(Address) >> (PTI_SHIFT - 3);
-    Offset &= (0xFFFFFFFFFULL << 3);
-    return reinterpret_cast<PHARDWARE_PTE>(PTE_BASE + Offset);
-}
-
+#define MiGetVirtualAddressMappedByPte(PTE)                      \
+  ((PVOID)((LONG_PTR)(((LONG_PTR)(PTE) - PTE_BASE)               \
+                      << (PAGE_SHIFT + VA_SHIFT - PTE_SHIFT)) >> \
+           VA_SHIFT))
