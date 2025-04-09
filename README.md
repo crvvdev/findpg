@@ -3,6 +3,8 @@ findpg
 
 This is an Windbg extension to find kernel pages allocated by PatchGuard. This program allows us to know how many PatchGuard contexts are running on a target environment and will help security researchers who want to analyze PatchGuard on their own.
 
+This extension was updated to support Windows 10 RS4+ guests.
+
 Installation
 -----------------
 
@@ -39,7 +41,7 @@ Host:
 - Windows 7 SP1 x64 and later 
 - x64 Debugger
 
-Target:
+Guest:
 - Windows Vista SP2 x64 and later
 
 License
